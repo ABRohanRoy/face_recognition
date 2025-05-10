@@ -82,31 +82,38 @@ class FaceEncoder:
         self.known_face_names.append(name)
         
         return True
+
+def register_face_live(self, name: str) -> bool:
+    """
+    Register a face using live camera feed with preview functionality.
+    
+    Args:
+        name: Name of the person
         
-    def register_face_live(self, name: str) -> bool:
-        """
-        Register a face using live camera feed.
+    Returns:
+        True if successful, False otherwise
+    """
+    # Initialize camera
+    cap = cv2.VideoCapture(0)
+    
+    if not cap.isOpened():
+        print("Could not open webcam")
+        return False
+    
+    face_captured = False
+    capture_confirmed = False
+    temp_image_path = os.path.join(os.path.dirname(self.encodings_dir), "temp", f"{name}_{time.time()}.jpg")
+    os.makedirs(os.path.dirname(temp_image_path), exist_ok=True)
+    
+    captured_frame = None
+    
+    try:
+        # State management
+        preview_mode = False
         
-        Args:
-            name: Name of the person
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        # Initialize camera
-        cap = cv2.VideoCapture(0)
-        
-        if not cap.isOpened():
-            print("Could not open webcam")
-            return False
-        
-        face_captured = False
-        temp_image_path = os.path.join(os.path.dirname(self.encodings_dir), "temp", f"{name}_{time.time()}.jpg")
-        os.makedirs(os.path.dirname(temp_image_path), exist_ok=True)
-        
-        try:
-            while True:
-                # Read frame
+        while True:
+            if not preview_mode:
+                # Camera capture mode
                 ret, frame = cap.read()
                 
                 if not ret:
@@ -141,10 +148,11 @@ class FaceEncoder:
                 # If 'c' pressed, capture the current frame
                 if key == ord('c'):
                     if face_locations:
-                        cv2.imwrite(temp_image_path, frame)
+                        captured_frame = frame.copy()
+                        cv2.imwrite(temp_image_path, captured_frame)
                         face_captured = True
-                        print("Face captured!")
-                        break
+                        preview_mode = True
+                        print("Face captured! Press 'y' to confirm or 'r' to retake.")
                     else:
                         print("No face detected. Please position your face in the camera.")
                 
@@ -152,24 +160,56 @@ class FaceEncoder:
                 elif key == ord('q'):
                     print("Registration cancelled")
                     break
-        
-        finally:
-            # Release camera
-            cap.release()
-            cv2.destroyAllWindows()
-        
-        # Process captured image
-        if face_captured:
-            success = self.encode_face(temp_image_path, name)
-            
-            # Clean up temporary file
-            if os.path.exists(temp_image_path):
-                os.remove(temp_image_path)
+            else:
+                # Preview mode - showing captured image
+                preview_frame = captured_frame.copy()
                 
-            return success
+                # Add instructions for confirmation
+                cv2.putText(preview_frame, "Press 'y' to confirm or 'r' to retake", 
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                
+                # Show captured image
+                cv2.imshow('Registration - Face Capture', preview_frame)
+                
+                key = cv2.waitKey(1) & 0xFF
+                
+                # If 'y' pressed, confirm capture
+                if key == ord('y'):
+                    capture_confirmed = True
+                    break
+                
+                # If 'r' pressed, return to capture mode
+                elif key == ord('r'):
+                    preview_mode = False
+                    face_captured = False
+                    print("Retaking image...")
+                
+                # If 'q' pressed, cancel registration
+                elif key == ord('q'):
+                    print("Registration cancelled")
+                    break
+    
+    finally:
+        # Release camera
+        cap.release()
+        cv2.destroyAllWindows()
+    
+    # Process captured image
+    if face_captured and capture_confirmed:
+        success = self.encode_face(temp_image_path, name)
         
-        return False
+        # Clean up temporary file
+        if os.path.exists(temp_image_path):
+            os.remove(temp_image_path)
+            
+        return success
+    
+    # Clean up temp file if exists but registration was cancelled
+    if os.path.exists(temp_image_path):
+        os.remove(temp_image_path)
         
+    return False
+
     def recognize_faces(self, face_locations: List[Tuple[int, int, int, int]], 
                        frame: np.ndarray) -> List[Tuple[str, Tuple]]:
         """

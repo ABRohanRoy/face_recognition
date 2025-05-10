@@ -119,20 +119,27 @@ def process_frames():
         cv2.destroyAllWindows()
 
 @router.post("/register", summary="Register a new student with face using live camera")
+@router.post("/register", summary="Register a new student with face using live camera")
 async def register_student(name: str = Form(...)):
     """
     Register a new student by capturing their face from the webcam.
     """
-    print(f"Starting registration process for student: {name}")
+    try:
+        print(f"Starting registration process for student: {name}")
+        
+        # Use the FaceEncoder's live registration method
+        success = face_encoder.register_face_live(name)
+        
+        if success:
+            return {"message": f"Student {name} registered successfully"}
+        else:
+            raise HTTPException(status_code=400, detail="Registration failed or was cancelled")
+    except Exception as e:
+        print(f"Error during registration: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Registration error: {str(e)}")
     
-    # Use the FaceEncoder's live registration method
-    success = face_encoder.register_face_live(name)
-    
-    if success:
-        return {"message": f"Student {name} registered successfully"}
-    else:
-        raise HTTPException(status_code=400, detail="Registration failed or was cancelled")
-
 @router.post("/start-attendance", summary="Start attendance tracking")
 async def start_attendance(background_tasks: BackgroundTasks):
     """
