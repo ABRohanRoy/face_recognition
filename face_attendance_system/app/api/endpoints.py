@@ -39,7 +39,7 @@ attendance_manager = AttendanceManager(ATTENDANCE_DIR)
 attendance_exporter = AttendanceExporter(ATTENDANCE_DIR)
 
 def process_frames():
-    """Background thread to process video frames and recognize faces."""
+    """Background thread to process video frames and recognize faces with Apple-inspired UI."""
     global camera, thread_running
     
     if not camera:
@@ -50,9 +50,19 @@ def process_frames():
             return
     
     try:
-        # Create a window that can be resized by the user
-        cv2.namedWindow('Face Recognition Attendance', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('Face Recognition Attendance', 800, 600)
+        # Create a window that can be properly seen
+        cv2.namedWindow('Attendance System', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Attendance System', 1024, 768)
+        
+        # Define UI colors (Apple-inspired)
+        APPLE_BG = (240, 240, 247)     # Light gray background
+        APPLE_BLUE = (255, 149, 0)     # Apple Music orange (BGR format)
+        APPLE_TEXT = (50, 50, 50)      # Dark gray text
+        APPLE_GREEN = (0, 200, 0)      # Green for known faces
+        APPLE_RED = (0, 0, 255)        # Red for unknown faces
+        APPLE_ACCENT = (255, 200, 0)   # Light orange for accents
+        
+        font = cv2.FONT_HERSHEY_DUPLEX
         
         while thread_running:
             # Read frame
@@ -62,6 +72,26 @@ def process_frames():
                 print("Error: Failed to capture frame")
                 continue
                 
+            # Create the main UI frame
+            h, w = frame.shape[:2]
+            ui_frame = np.full((h + 140, w, 3), APPLE_BG, dtype=np.uint8)
+            
+            # Add top header bar
+            cv2.rectangle(ui_frame, (0, 0), (w, 60), APPLE_BLUE, -1)
+            cv2.putText(ui_frame, "Attendance System", (20, 40), 
+                        font, 1, (255, 255, 255), 1)
+            
+            current_time = datetime.now().strftime("%H:%M:%S")
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            time_width = cv2.getTextSize(current_time, font, 0.8, 1)[0][0]
+            cv2.putText(ui_frame, current_time, (w - time_width - 20, 30), 
+                        font, 0.8, (255, 255, 255), 1)
+            cv2.putText(ui_frame, current_date, (w - time_width - 20, 50), 
+                        font, 0.6, (255, 255, 255), 1)
+            
+            # Place camera feed in the main area
+            ui_frame[70:70+h, 0:w] = frame
+                
             # Detect faces
             face_locations, rgb_small_frame = face_detector.detect_faces(frame)
             
@@ -69,43 +99,67 @@ def process_frames():
             face_results = face_encoder.recognize_faces(face_locations, rgb_small_frame)
             
             # Mark attendance for recognized faces
+            recognized_names = []
             for name, _ in face_results:
                 if name != "Unknown":
                     attendance_manager.mark_attendance(name)
+                    recognized_names.append(name)
             
-            # Create a copy of the frame for display
-            display_frame = frame.copy()
-            
-            # Draw rectangles around faces with names
+            # Draw rectangles around faces with names (Modern, minimal style)
             for name, (top, right, bottom, left) in face_results:
-                # Set color based on recognition status (green for known, red for unknown)
-                color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+                # Set color based on recognition status
+                color = APPLE_GREEN if name != "Unknown" else APPLE_RED
                 
-                # Draw a box around the face
-                cv2.rectangle(display_frame, (left, top), (right, bottom), color, 2)
+                # Draw a box around the face (in the UI frame)
+                cv2.rectangle(ui_frame, (left, top+70), (right, bottom+70), color, 2)
                 
-                # Draw a label with a name below the face
-                cv2.rectangle(display_frame, (left, bottom - 35), (right, bottom), color, cv2.FILLED)
-                cv2.putText(display_frame, name, (left + 6, bottom - 6), 
-                            cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 1)
+                # Add a label with the name (minimal design)
+                label_y = bottom + 70 + 35
+                cv2.rectangle(ui_frame, (left, bottom+70), (right, label_y), color, cv2.FILLED)
+                
+                # Ensure text fits within the label
+                scale = 0.6
+                name_width = cv2.getTextSize(name, font, scale, 1)[0][0]
+                while name_width > (right - left - 10) and scale > 0.3:
+                    scale -= 0.05
+                    name_width = cv2.getTextSize(name, font, scale, 1)[0][0]
+                
+                text_x = left + (right - left - name_width) // 2
+                cv2.putText(ui_frame, name, (text_x, bottom+70+25), 
+                            font, scale, (255, 255, 255), 1)
             
-            # Add attendance status to the frame
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            cv2.putText(display_frame, f"Attendance Active - {current_time}", 
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 120, 255), 2)
+            # Add bottom info bar
+            cv2.rectangle(ui_frame, (0, h+80), (w, h+140), (255, 255, 255), -1)
             
-            # Show number of recognized students
+            # Add statistics and instructions
             recognized_count = sum(1 for name, _ in face_results if name != "Unknown")
             total_count = len(face_results)
-            cv2.putText(display_frame, f"Recognized: {recognized_count}/{total_count}", 
-                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 120, 255), 2)
+            
+            cv2.putText(ui_frame, f"Recognized: {recognized_count}/{total_count}", 
+                        (20, h+110), font, 0.7, APPLE_TEXT, 1)
+            
+            # Show recently detected students
+            if recognized_names:
+                recent_text = "Present: " + ", ".join(recognized_names[:3])
+                if len(recognized_names) > 3:
+                    recent_text += f" +{len(recognized_names)-3} more"
+                
+                # Calculate text width to align properly
+                text_width = cv2.getTextSize(recent_text, font, 0.6, 1)[0][0]
+                if text_width > w - 300:  # Truncate if too long
+                    recent_text = recent_text[:40] + "..."
+                
+                cv2.putText(ui_frame, recent_text, 
+                            (20, h+130), font, 0.6, APPLE_TEXT, 1)
             
             # Add instruction to quit
-            cv2.putText(display_frame, "Press 'q' to stop attendance", 
-                        (10, frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 120, 255), 2)
+            quit_text = "Press 'q' to stop"
+            text_width = cv2.getTextSize(quit_text, font, 0.7, 1)[0][0]
+            cv2.putText(ui_frame, quit_text, 
+                        (w - text_width - 20, h+110), font, 0.7, APPLE_RED, 1)
             
-            # Display the resulting frame for visualization
-            cv2.imshow('Face Recognition Attendance', display_frame)
+            # Display the final UI frame
+            cv2.imshow('Attendance System', ui_frame)
             
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -118,8 +172,6 @@ def process_frames():
             camera.release()
         cv2.destroyAllWindows()
 
-@router.post("/register", summary="Register a new student with face using live camera")
-@router.post("/register", summary="Register a new student with face using live camera")
 async def register_student(name: str = Form(...)):
     """
     Register a new student by capturing their face from the webcam.
